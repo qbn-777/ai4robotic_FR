@@ -76,7 +76,8 @@ class SimpleDrivingEnv(gym.Env):
         dist_to_goal = math.sqrt(((carpos[0] - goalpos[0]) ** 2 +
                                   (carpos[1] - goalpos[1]) ** 2))
         # reward = max(self.prev_dist_to_goal - dist_to_goal, 0)
-        reward = -dist_to_goal
+        
+        reward = -dist_to_goal # The closer the car get to goal, the smaller the 
         self.prev_dist_to_goal = dist_to_goal
 
         # Done by reaching goal

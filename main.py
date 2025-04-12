@@ -1,29 +1,59 @@
 import gym
-import torch
-from agent import TRPOAgent
 import simple_driving
-import time
+from stable_baselines3 import DQN
+from stable_baselines3.common.env_util import make_vec_env
+import pybullet as p
 
 
 def main():
-    nn = torch.nn.Sequential(torch.nn.Linear(8, 64), torch.nn.Tanh(),
-                             torch.nn.Linear(64, 2))
-    agent = TRPOAgent(policy=nn)
+    # Create the environment
+    env = make_vec_env(lambda: gym.make("SimpleDriving-v0", apply_api_compatibility=True, renders=False, isDiscrete=True))
 
-    agent.load_model("agent.pth")
-    agent.train("SimpleDriving-v0", seed=0, batch_size=5000, iterations=100,
-                max_episode_length=250, verbose=True)
-    agent.save_model("agent.pth")
+    # Initialise the DQN model
+    model = DQN("MlpPolicy",# Use MLP policy for DQN
+                env,
+                verbose=1, # Show training logs
+                learning_rate=1e-3, 
+                buffer_size=10000, 
+                learning_starts=1000, 
+                batch_size=32)
 
-    env = gym.make('SimpleDriving-v0')
-    ob = env.reset()
-    while True:
-        action = agent(ob)
-        ob, _, done, _ = env.step(action)
+    # Train the model
+    model.learn(total_timesteps=100_000)
+
+    # Save the trained model
+    model.save("dqn_simple_driving")
+
+    # Load the trained model
+    model = DQN.load("dqn_simple_driving")
+
+    # Create environment with GUI
+    env = gym.make("SimpleDriving-v0", apply_api_compatibility=True, renders=True, isDiscrete=True)
+
+    obs, info = env.reset()
+    # Set camera right after reset
+    p.resetDebugVisualizerCamera(cameraDistance=17, cameraYaw=45, cameraPitch=-45, cameraTargetPosition=[0, 0, 0])
+
+    for _ in range(2000):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, _, info = env.step(action)
         env.render()
         if done:
-            ob = env.reset()
-            time.sleep(1/30)
+            obs, info = env.reset()
+
+    env.close()
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
 
 
 if __name__ == '__main__':
