@@ -8,6 +8,8 @@ from simple_driving.resources.plane import Plane
 from simple_driving.resources.goal import Goal
 import matplotlib.pyplot as plt
 import time
+from simple_driving.resources.obstacle import Obstacle
+
 
 RENDER_HEIGHT = 720
 RENDER_WIDTH = 960
@@ -48,47 +50,171 @@ class SimpleDrivingEnv(gym.Env):
         self._envStepCounter = 0
 
     def step(self, action):
-        # Feed action to the car and get observation of car's state
-        if (self._isDiscrete):
+        # Convert discrete action into throttle + steering
+        if self._isDiscrete:
             fwd = [-1, -1, -1, 0, 0, 0, 1, 1, 1]
             steerings = [-0.6, 0, 0.6, -0.6, 0, 0.6, -0.6, 0, 0.6]
             throttle = fwd[action]
             steering_angle = steerings[action]
             action = [throttle, steering_angle]
+
         self.car.apply_action(action)
+
         for i in range(self._actionRepeat):
-          self._p.stepSimulation()
-          if self._renders:
-            time.sleep(self._timeStep)
+            self._p.stepSimulation()
+            if self._renders:
+                time.sleep(self._timeStep)
 
-          carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
-          goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
-          car_ob = self.getExtendedObservation()
+            carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
+            goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
+            car_ob = self.getExtendedObservation()
 
-          if self._termination():
+            if self._termination():
+                self.done = True
+                break
+            self._envStepCounter += 1
+
+        # Calculate distance to goal
+        dist_to_goal = math.sqrt((carpos[0] - goalpos[0]) ** 2 + (carpos[1] - goalpos[1]) ** 2)
+        progress = self.prev_dist_to_goal - dist_to_goal
+        reward = progress * 10  # encourage moving closer
+
+        # Small time penalty to encourage speed
+        reward -= 0.1
+
+
+        # Check for collisions with obstacles
+        for obs in self.obstacles:
+            if len(self._p.getContactPoints(bodyA=self.car.car, bodyB=obs.obstacle)) > 0:
+                reward -= 4  # collision penalty
+                break
+
+        self.prev_dist_to_goal = dist_to_goal
+
+        # If goal is reached
+        if dist_to_goal < 1.5 and not self.reached_goal:
             self.done = True
-            break
-          self._envStepCounter += 1
+            self.reached_goal = True
+            reward += 150  # bonus for success
 
-        # Compute reward as L2 change in distance to goal
-        # dist_to_goal = math.sqrt(((car_ob[0] - self.goal[0]) ** 2 +
-                                  # (car_ob[1] - self.goal[1]) ** 2))
-        dist_to_goal = math.sqrt(((carpos[0] - goalpos[0]) ** 2 +
-                                  (carpos[1] - goalpos[1]) ** 2))
-        # reward = max(self.prev_dist_to_goal - dist_to_goal, 0)
-        
-        reward = -dist_to_goal # The closer the car get to goal, the smaller the 
+        return np.array(car_ob, dtype=np.float32), reward, self.done, {}
+
+    
+
+    #Change this to step when 
+    def step2(self, action):
+        #Funtion for prioritise facing the goal
+        # Feed action to the car and get observation of car's state
+        if self._isDiscrete:
+            fwd = [-1, -1, -1, 0, 0, 0, 1, 1, 1]
+            steerings = [-0.6, 0, 0.6, -0.6, 0, 0.6, -0.6, 0, 0.6]
+            throttle = fwd[action]
+            steering_angle = steerings[action]
+            action = [throttle, steering_angle]
+
+        self.car.apply_action(action)
+
+        for i in range(self._actionRepeat):
+            self._p.stepSimulation()
+            if self._renders:
+                time.sleep(self._timeStep)
+
+            carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
+            goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
+            car_ob = self.getExtendedObservation()
+
+            if self._termination():
+                self.done = True
+                break
+            self._envStepCounter += 1
+
+        # Compute distance to goal
+        dist_to_goal = math.sqrt((carpos[0] - goalpos[0]) ** 2 + (carpos[1] - goalpos[1]) ** 2)
+        reward = -dist_to_goal  # Default reward: closer is better
+
+        # ✅ ADDITION: Encourage facing the goal
+        car_euler = self._p.getEulerFromQuaternion(carorn)
+        car_yaw = car_euler[2]
+
+        dir_to_goal = np.array([goalpos[0] - carpos[0], goalpos[1] - carpos[1]])
+        dir_to_goal /= np.linalg.norm(dir_to_goal) + 1e-8  # normalize + avoid div by zero
+
+        car_forward = np.array([math.cos(car_yaw), math.sin(car_yaw)])
+        alignment = np.dot(dir_to_goal, car_forward)  # ranges from -1 to 1
+
+        reward += alignment * 5  # bonus for facing goal
+
         self.prev_dist_to_goal = dist_to_goal
 
         # Done by reaching goal
         if dist_to_goal < 1.5 and not self.reached_goal:
-            #print("reached goal")
             self.done = True
             self.reached_goal = True
+            reward += 100  # big bonus for success!
 
         ob = car_ob
-        return ob, reward, self.done, dict()
+    
+        return np.array(ob, dtype=np.float32), reward, self.done, False, {}
+    
+    def step3(self, action):
+        # Process discrete actions into throttle and steering
+        if self._isDiscrete:
+            fwd = [-1, -1, -1, 0, 0, 0, 1, 1, 1]
+            steerings = [-0.6, 0, 0.6, -0.6, 0, 0.6, -0.6, 0, 0.6]
+            throttle = fwd[action]
+            steering_angle = steerings[action]
+            action = [throttle, steering_angle]
 
+        self.car.apply_action(action)
+
+        for i in range(self._actionRepeat):
+            self._p.stepSimulation()
+            if self._renders:
+                time.sleep(self._timeStep)
+
+            carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
+            goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
+            car_ob = self.getExtendedObservation()
+
+            if self._termination():
+                self.done = True
+                break
+            self._envStepCounter += 1
+
+        # 1. Distance to goal
+        dist_to_goal = math.sqrt((carpos[0] - goalpos[0]) ** 2 + (carpos[1] - goalpos[1]) ** 2)
+        progress = self.prev_dist_to_goal - dist_to_goal
+
+        # 2. Orientation alignment
+        car_euler = self._p.getEulerFromQuaternion(carorn)
+        car_yaw = car_euler[2]
+
+        dir_to_goal = np.array([goalpos[0] - carpos[0], goalpos[1] - carpos[1]])
+        dir_to_goal /= np.linalg.norm(dir_to_goal) + 1e-8  # avoid division by zero
+
+        car_forward = np.array([math.cos(car_yaw), math.sin(car_yaw)])
+        alignment = np.dot(dir_to_goal, car_forward)  # -1 (away) to +1 (facing goal)
+
+        # 3. Reward logic
+        reward = 0
+        reward += progress * 10             # Encourage moving closer
+        reward += alignment * 5             # Encourage facing the goal
+        reward -= 0.1                       # Slight time penalty
+
+        # Bonus for reaching the goal
+        if dist_to_goal < 1.5 and not self.reached_goal:
+            reward += 100
+            self.reached_goal = True
+            self.done = True
+
+        # Update distance
+        self.prev_dist_to_goal = dist_to_goal
+
+        terminated = self.done
+        return np.array(car_ob, dtype=np.float32), reward, terminated, {}
+
+
+        
     def seed(self, seed=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         return [seed]
@@ -114,13 +240,30 @@ class SimpleDrivingEnv(gym.Env):
         # Visual element of the goal
         self.goal_object = Goal(self._p, self.goal)
 
+        #ONLY UNCOMMENT FOR THIS WHEN RUN MODEL THAT IS TRAINED WITH OBSTACLES
+        # Add obstacles
+        self.obstacles = []
+
+        positions = [
+            (0, -6), (5, 2), (-5, -4), (3, -6) , (6, 0),
+            (-6, 3), (2, -5), (-4, 4), (1, 6), (7, -1), (-2, 2),
+            (4, -3), (6, 6), (-3, 0)
+        ]
+        for pos in positions:
+            self.obstacles.append(Obstacle(self._p, position=pos))
+
+        
+
         # Get observation to return
         carpos = self.car.get_observation()
 
         self.prev_dist_to_goal = math.sqrt(((carpos[0] - self.goal[0]) ** 2 +
                                            (carpos[1] - self.goal[1]) ** 2))
         car_ob = self.getExtendedObservation()
+
         return np.array(car_ob, dtype=np.float32)
+
+
 
     def render(self, mode='human'):
         if mode == "fp_camera":
@@ -192,3 +335,4 @@ class SimpleDrivingEnv(gym.Env):
 
     def close(self):
         self._p.disconnect()
+        

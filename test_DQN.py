@@ -3,8 +3,9 @@ import simple_driving
 from stable_baselines3 import DQN
 import pybullet as p
 
-# Load the trained model
-model = DQN.load("dqn_simple_driving")
+#model = DQN.load("dqn_simple_driving")
+#model = DQN.load("dqn_simple_driving")
+model= DQN.load("dqn_simple_driving_interrupted")
 
 # Create environment with GUI
 env = gym.make("SimpleDriving-v0", apply_api_compatibility=True, renders=True, isDiscrete=True)
